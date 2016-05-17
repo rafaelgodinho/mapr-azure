@@ -34,10 +34,14 @@
         },
         "nicBasename": {
             "type": "string"
+        },
+        "sshKey": {
+            "defaultValue": "",
+            "type": "securestring"
         }        
     },
     "variables": {
-        "vmSize" : "Standard_DS14",
+        "vmSize" : "Standard_DS13",
         "vmBasename": "[concat(parameters('clusterName'),'node')]"
     },
     "resources": [
@@ -85,7 +89,17 @@
             "osProfile": {
                 "computername": "[concat(variables('vmBasename'),copyIndex())]",
                 "adminUsername": "[parameters('adminUsername')]",
-                "adminPassword": "[parameters('adminPassword')]"
+                "linuxConfiguration": {
+                    "disablePasswordAuthentication": "true",
+                    "ssh": {
+                        "publicKeys": [
+                            {
+                            "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                            "keyData": "[parameters('sshKey')]"
+                            }
+                        ]
+                    }
+                }
             },
             "storageProfile": {
               "imageReference": {

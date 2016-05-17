@@ -35,19 +35,23 @@
     },
     "variables": {},
     "resources": [{
-      "apiVersion": "2015-05-01-preview",
+      "apiVersion": "2015-06-15",
       "type": "Microsoft.Network/publicIPAddresses",
-      "name": "[parameters('publicIPAddressBasename')]",
+      "name": "[concat(parameters('publicIPAddressBasename'), copyIndex())]",
       "location": "[parameters('location')]",
+      "copy": {
+          "name": "publicIPLoop",
+          "count": "[parameters('clusterSize')]"
+      },
       "properties": {
           "publicIPAllocationMethod": "[parameters('publicIPAddressType')]",
           "dnsSettings": {
-              "domainNameLabel": "[parameters('clusterName')]"
+       	      "domainNameLabel": "[concat(parameters('clusterName'),'-',substring(uniquestring(resourceGroup().id),0,8),'-node',copyIndex())]",
           }
       }
     },
     {
-      "apiVersion": "2015-05-01-preview",
+      "apiVersion": "2015-06-15",
       "type": "Microsoft.Network/virtualNetworks",
       "name": "[concat(parameters('clusterName'), '-vnet')]",
       "location": "[parameters('location')]",
@@ -68,11 +72,12 @@
       }
     },
     {
-        "apiVersion": "2015-05-01-preview",
+        "apiVersion": "2015-06-15",
         "type": "Microsoft.Network/networkInterfaces",
         "name": "[concat(parameters('nicBasename'), copyIndex())]",
         "location": "[parameters('location')]",
         "dependsOn": [
+            "[concat('Microsoft.Network/publicIPAddresses/', parameters('publicIPAddressBasename'), copyIndex())]",
             "[concat('Microsoft.Network/virtualNetworks/', parameters('clusterName'), '-vnet')]"
         ],
         "copy": {
@@ -87,6 +92,9 @@
                     "privateIPAllocationMethod": "Dynamic",
                     "subnet": {
                         "id": "[parameters('subnet1Ref')]"
+                    },
+                    "publicIPAddress": {
+                        "id": "[resourceId('Microsoft.Network/publicIPAddresses',concat(parameters('publicIPAddressBasename'),copyIndex()))]"
                     }
                 }
             }
@@ -95,3 +103,4 @@
     }
     ]
 }
+

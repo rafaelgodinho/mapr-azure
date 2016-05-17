@@ -23,48 +23,47 @@
 #
 murl_top=http://metadata/computeMetadata/v1
 murl_attr="${murl_top}/instance/attributes"
-md_header="Metadata-Flavor: Google"
 
-THIS_FQDN=$(curl -H "$md_header" -f $murl_top/instance/hostname)
+THIS_FQDN=$(curl -f $murl_top/instance/hostname)
 if [ -z "${THIS_FQDN}" ] ; then
 	THIS_HOST=${THIS_FQDN/.*/}
 else
 	THIS_HOST=`/bin/hostname`
 fi
 
-THIS_IMAGE=$(curl -H "$md_header" -f $murl_attr/image)    # name of initial image loaded here
-GCE_PROJECT=$(curl -H "$md_header" -f $murl_top/project/project-id) 
-
-
-# NOTE: We could be smart and look to see if THIS_IMAGE was a 
-# MapR image, and bail on all the rest of this script.
-
 # Definitions for our installation
 #	These should use the same meta-data definitions as the configure-* script
 #
-MAPR_HOME=$(curl -H "$md_header" -f $murl_attr/maprhome)	# software installation directory
-MAPR_HOME=${MAPR_HOME:-"/opt/mapr"}
-MAPR_UID=$(curl -H "$md_header" -f $murl_attr/mapruid)
-MAPR_UID=${MAPR_UID:-"2000"}
-MAPR_USER=$(curl -H "$md_header" -f $murl_attr/mapruser)
-MAPR_USER=${MAPR_USER:-"mapr"}
-MAPR_GROUP=$(curl -H "$md_header" -f $murl_attr/maprgroup)
-MAPR_GROUP=${MAPR_GROUP:-"mapr"}
-MAPR_PASSWD=$(curl -H "$md_header" -f $murl_attr/maprpasswd)
-MAPR_PASSWD=${MAPR_PASSWD:-"MapR"}
+curl -f $murl_attr &> /dev/null
+if [ $? -eq 0 ] ; then
+	MAPR_HOME=$(curl -f $murl_attr/maprhome)
+	MAPR_UID=$(curl -f $murl_attr/mapruid)
+	MAPR_USER=$(curl -f $murl_attr/mapruser)
+	MAPR_GROUP=$(curl -f $murl_attr/maprgroup)
+	MAPR_PASSWD=$(curl -f $murl_attr/maprpasswd)
 
-MAPR_VERSION=$(curl -H "$md_header" -f $murl_attr/maprversion)
-MAPR_VERSION=${MAPR_VERSION:-"4.1.0"}
-MAPR_PACKAGES=$(curl -H "$md_header" -f $murl_attr/maprpackages)
+	MAPR_VERSION=$(curl -f $murl_attr/maprversion)
+	MAPR_PACKAGES=$(curl -f $murl_attr/maprpackages)
+fi
+
+MAPR_HOME=${MAPR_HOME:-"/opt/mapr"}
+MAPR_UID=${MAPR_UID:-"5000"}
+MAPR_USER=${MAPR_USER:-"mapr"}
+MAPR_GROUP=${MAPR_GROUP:-"mapr"}
+MAPR_PASSWD=${MAPR_PASSWD:-"MapR"}
+MAPR_VERSION=${MAPR_VERSION:-"5.0.0"}
+
 MAPR_PACKAGES=${MAPR_PACKAGES:-"core,fileserver"}
 MAPR_PACKAGES=${MAPR_PACKAGES//:/,}
-
 
 LOG=/tmp/prepare-mapr-node.log
 OUT=/tmp/prepare-mapr-node.out
 
 # Extend the PATH.  This shouldn't be needed after Compute leaves beta.
 PATH=/sbin:/usr/sbin:$PATH
+
+# Lock script
+LOCK_SCRIPT=/tmp/lock.sh
 
 
 # Helper utility to log the commands that are being run and
@@ -89,6 +88,9 @@ c() {
 #   NOTE: this target will change FREQUENTLY !!!
 #
 function add_epel_repo() {
+	yum repolist enabled | grep -q ^epel
+	[ $? -eq 0 ] && return
+
     EPEL_RPM=/tmp/epel.rpm
 	if [ `which lsb_release 2> /dev/null` ] ; then
     	CVER=`lsb_release -r | awk '{print $2}'`
@@ -118,14 +120,8 @@ function add_epel_repo() {
 }
 
 
-# The "customized" debian distributions often have configuration
-# files that should not be overwritten during the upgrade process.
-# We need the Dpkg::Options arg so that we don't get an error
-# during the upgrad operation that will cause us to bail out
-# right away.
 function update_os_deb() {
 	apt-get update
-#	c apt-get upgrade -y -o Dpkg::Options::="--force-confdef,confold"
 	c apt-get install -y nfs-common iputils-arping libsysfs2
 	c apt-get install -y ntp
 
@@ -133,27 +129,51 @@ function update_os_deb() {
 	c apt-get install -y sysstat
 	apt-get install -y dnsutils less lsof
 	apt-get install -y clustershell pdsh realpath
+	apt-get install -y sshpass
 
 	[ -f /etc/debian_version ] && touch /etc/init.d/.legacy-bootordering
 }
 
-# For CentOS and Fedora, the GCE environment does not support 
-# plugin modules to be added to the kernel ... so we don't
-# need the module-init-tools package.   Moreover, on several
-# occasions, updating that module cause strange behavior during
-# instance launch.
+# Helper function for YUM install since we often see yum metadata
+# issues in cloud deployments.   Allow 1 failure ... rebuild cache
+# If the actions fails again, exit.
+YUM_FAILURE=0
+function do_yum_install() {
+	if [ $YUM_FAILURE -eq 0 ] ; then
+    	echo "yum install -y $@" >> $LOG
+		yum install -y $@
+		[ $? -eq 0 ] && return
+		yum clean all
+		yum makecache
+		YUM_FAILURE=1
+	fi
+
+	c yum install -y $@
+}
+
 function update_os_rpm() {
 	add_epel_repo
 
-	yum makecache
-#	c yum update -y --exclude=module-init-tools
-	c yum install -y nfs-utils iputils libsysfs nc
-	c yum install -y ntp ntpdate
+	yum clean expire-cache
+	do_yum_install nfs-utils iputils libsysfs nc
+	do_yum_install ntp ntpdate
 
-	c yum install -y syslinux sdparm
-	c yum install -y sysstat
+	do_yum_install syslinux sdparm
+	do_yum_install sysstat
+
+		# Failure to install these components IS NOT critical
 	yum install -y bind-utils less lsof
 	yum install -y clustershell pdsh
+	yum install -y sshpass
+
+		# Patch for CentOS 7.0; force mapr-* init scripts to 
+		# avoid use of systemctl (needed for MapR 4.1.0 and 5.0.0)
+		#	... DISABLED FOR NOW ... 
+#	initfuncs=/etc/init.d/functions
+#	if [ -f $initfuncs ] ; then
+#		[ grep -q _use_systemctl=1 $initfuncs ] &&
+#		  sed -i -e '/\/etc\/init.d\/\*/i\/etc/init.d/mapr-*)\n_use_systemctl=0\n;;' $initfuncs
+#	fi
 }
 
 # Make sure that NTP service is sync'ed and running
@@ -229,8 +249,23 @@ function update_ssh_config() {
   sed -i 's/PasswordAuthentication .*no$/PasswordAuthentication yes/' $SSHD_CONFIG
   sed -i 's/PermitRootLogin .*no$/PermitRootLogin yes/' $SSHD_CONFIG
 
-	[ service ssh status &> /dev/null ]   &&  service ssh restart
-	[ service sshd status &> /dev/null ]  &&  service sshd restart
+
+  [ service ssh status &> /dev/null ]   &&  service ssh restart
+  [ service sshd status &> /dev/null ]  &&  service sshd restart
+  service sshd reload
+
+	# This is created to lock the server later (if we need to disable
+	# password access).   The name of the script MUST MATCH that
+	# specified in the other *lock*.sh scripts
+  cat > $LOCK_SCRIPT << lsEOF
+#!/bin/bash
+sed -i 's/PasswordAuthentication.*/PasswordAuthentication no/g' $SSHD_CONFIG
+[ service ssh status &> /dev/null ]   &&  service ssh restart
+[ service sshd status &> /dev/null ]  &&  service sshd restart
+service sshd reload
+lsEOF
+
+  chmod 600 $LOCK_SCRIPT
 }
 
 function update_os() {
@@ -317,7 +352,8 @@ function install_openjdk_deb() {
 function install_oraclejdk_rpm() {
     echo "Installing Oracle JDK (for rpm distros)" >> $LOG
 
-	JDK_RPM="http://download.oracle.com/otn-pub/java/jdk/7u75-b13/jdk-7u75-linux-x64.rpm"
+#	JDK_RPM="http://download.oracle.com/otn-pub/java/jdk/7u75-b13/jdk-7u75-linux-x64.rpm"
+	JDK_RPM="http://download.oracle.com/otn-pub/java/jdk/8u51-b16/jdk-8u51-linux-x64.rpm"
 
 	$(cd /tmp; curl -f -L -C - -b "oraclelicense=accept-securebackup-cookie" -O $JDK_RPM)
 
@@ -357,6 +393,16 @@ function install_openjdk_rpm() {
 function install_java() {
 	echo Installing JAVA >> $LOG
 
+		# Support a "-f" force option, which removes OpenJDK so
+		# that we can install Oracle JDK
+	if [ "${1:-}" = "-f" ] ; then
+		if which dpkg &> /dev/null; then
+			apt-get remove -y --purge 'openjdk-?-jdk'
+		elif which rpm &> /dev/null; then
+			yum remove -y 'java-1.?.?-openjdk-devel'
+		fi
+	fi
+
 		# If Java is already installed, simply set JAVA_HOME
 		# Should check for Java version, but both 1.6 and 1.7 work.
 		#
@@ -367,7 +413,7 @@ function install_java() {
 
 			# We could be linked to the JRE or JDK version; we want
 			# the REAL jdk, so look for javac in the directory we choose
-		jcmd=`python -c "import os; print os.path.realpath('$javacmd')"`
+		jcmd=`readlink -f $javacmd`
 		if [ -x ${jcmd%/jre/bin/java}/bin/javac ] ; then
 			JAVA_HOME=${jcmd%/jre/bin/java}
 		elif [ -x ${jcmd%/java}/javac ] ; then
@@ -465,9 +511,8 @@ passwdEOF
 		# Create sshkey for $MAPR_USER (must be done AS MAPR_USER)
 	su $MAPR_USER -c "mkdir ~${MAPR_USER}/.ssh ; chmod 700 ~${MAPR_USER}/.ssh"
 	su $MAPR_USER -c "ssh-keygen -q -t rsa -f ~${MAPR_USER}/.ssh/id_rsa -P '' "
-	su $MAPR_USER -c "cp -p ~${MAPR_USER}/.ssh/id_rsa ~${MAPR_USER}/.ssh/id_launch"
-	su $MAPR_USER -c "cp -p ~${MAPR_USER}/.ssh/id_rsa.pub ~${MAPR_USER}/.ssh/authorized_keys"
-	su $MAPR_USER -c "chmod 600 ~${MAPR_USER}/.ssh/authorized_keys"
+#	su $MAPR_USER -c "cat ~${MAPR_USER}/.ssh/id_rsa.pub >> ~${MAPR_USER}/.ssh/authorized_keys"
+#	su $MAPR_USER -c "chmod 600 ~${MAPR_USER}/.ssh/authorized_keys"
 		
 		# TBD : copy the key-pair used to launch the instance directly
 		# into the mapr account to simplify connection from the
@@ -486,11 +531,13 @@ CDPATH=.:$HOME
 export CDPATH
 
 # PATH updates based on settings in MapR env file
+#	NOTE: MapR installer sometimes removes MAPR_ENV= line ...
+#	so we need to be careful about our execution here.
 MAPR_HOME=${MAPR_HOME:-/opt/mapr}
 MAPR_ENV=\${MAPR_HOME}/conf/env.sh
-[ -f \${MAPR_ENV} ] && . \${MAPR_ENV} 
-[ -n "\${JAVA_HOME}:-" ] && PATH=\$PATH:\$JAVA_HOME/bin
-[ -n "\${MAPR_HOME}:-" ] && PATH=\$PATH:\$MAPR_HOME/bin
+[ -n "\${MAPR_ENV:-}" ] && [ -f \${MAPR_ENV} ] && . \${MAPR_ENV} 
+[ -n "\${JAVA_HOME:-}" ] && PATH=\$PATH:\$JAVA_HOME/bin
+[ -n "\${MAPR_HOME:-}" ] && PATH=\$PATH:\$MAPR_HOME/bin
 
 set -o vi
 
@@ -541,7 +588,7 @@ function setup_mapr_repo_rpm() {
 
 	if [ -f $MAPR_REPO_FILE ] ; then
 		sed -i "s|/releases/v.*/|/releases/v${MAPR_VERSION}/|" $MAPR_REPO_FILE
-		yum makecache
+		yum makecache fast
 		return
 	fi
 
@@ -563,7 +610,7 @@ gpgcheck=0
 protected=1
 EOF_redhat
 
-    yum makecache
+    yum makecache fast
 }
 
 function setup_mapr_repo() {

@@ -34,10 +34,14 @@
         },
         "nicBasename": {
             "type": "string"
-        }        
+        },
+        "sshKey": {
+            "defaultValue": "",
+            "type": "securestring"
+        }      
     },
     "variables": {
-        "vmSize" : "Standard_DS14",
+        "vmSize" : "Standard_D12",
         "vmBasename": "[concat(parameters('clusterName'),'node')]"
     },
     "resources": [
@@ -48,7 +52,7 @@
         "properties": {
             "mode": "Incremental",
             "templateLink": {
-                "uri": "[concat(parameters('scriptsUri'), 'premium_lrs_storage.json')]",
+                "uri": "[concat(parameters('scriptsUri'), 'standard_lrs_storage.json')]",
                 "contentVersion": "1.0.0.0"
             },
             "parameters": {
@@ -85,7 +89,17 @@
             "osProfile": {
                 "computername": "[concat(variables('vmBasename'),copyIndex())]",
                 "adminUsername": "[parameters('adminUsername')]",
-                "adminPassword": "[parameters('adminPassword')]"
+                "linuxConfiguration": {
+                    "disablePasswordAuthentication": "true",
+                    "ssh": {
+                        "publicKeys": [
+                            {
+                            "path": "[concat('/home/', parameters('adminUsername'), '/.ssh/authorized_keys')]",
+                            "keyData": "[parameters('sshKey')]"
+                            }
+                        ]
+                    }
+                }
             },
             "storageProfile": {
               "imageReference": {
@@ -138,7 +152,43 @@
                         "Uri": "[concat('http://', parameters('storageAccountBasename'), copyIndex(), '.blob.core.windows.net/vhds3/', 'datadisk3.vhd')]"
                     },
                     "createOption": "Empty"
-                }             
+                },
+                {
+                    "name": "datadisk4",
+                    "diskSizeGB": "1023",
+                    "lun": 4,
+                    "vhd": {
+                        "Uri": "[concat('http://', parameters('storageAccountBasename'), copyIndex(), '.blob.core.windows.net/vhds4/', 'datadisk4.vhd')]"
+                    },
+                    "createOption": "Empty"
+                },
+                {
+                    "name": "datadisk5",
+                    "diskSizeGB": "1023",
+                    "lun": 5,
+                    "vhd": {
+                        "Uri": "[concat('http://', parameters('storageAccountBasename'), copyIndex(), '.blob.core.windows.net/vhds5/', 'datadisk5.vhd')]"
+                    },
+                    "createOption": "Empty"
+                },
+                {
+                    "name": "datadisk6",
+                    "diskSizeGB": "1023",
+                    "lun": 6,
+                    "vhd": {
+                        "Uri": "[concat('http://', parameters('storageAccountBasename'), copyIndex(), '.blob.core.windows.net/vhds6/', 'datadisk6.vhd')]"
+                    },
+                    "createOption": "Empty"
+                },
+                {
+                    "name": "datadisk7",
+                    "diskSizeGB": "1023",
+                    "lun": 7,
+                    "vhd": {
+                        "Uri": "[concat('http://', parameters('storageAccountBasename'), copyIndex(), '.blob.core.windows.net/vhds7/', 'datadisk7.vhd')]"
+                    },
+                    "createOption": "Empty"
+                }                
               ]
             },
             "networkProfile": {

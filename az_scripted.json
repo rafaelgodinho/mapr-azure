@@ -3,7 +3,7 @@
     "contentVersion": "1.0.0.0",
     "parameters" : {
 		"artifactsBaseUrl": {
-            "defaultValue" : "https://raw.githubusercontent.com/mapr/mapr-azure/master",
+			"defaultValue" : "https://raw.githubusercontent.com/mapr/mapr-azure/master",
 			"type": "string",
 			"metadata": {
 				"artifactsBaseUrl": "Base URL of the Publisher Template gallery package"
@@ -19,7 +19,7 @@
         "clusterSize": {
             "defaultValue": 3,
             "type": "int",
-            "allowedValues": [1, 3, 6, 10, 20, 30],
+            "allowedValues": [1, 2, 3, 4, 5, 6, 10, 20, 30],
             "metadata": {
                  "description": "Number of instances to deploy for the cluster"
             }
@@ -33,16 +33,16 @@
             }
         },
         "maprVersion": {
-            "defaultValue": "5.1.0",
+            "defaultValue": "5.0.0",
             "type": "string",
-            "allowedValues": ["4.1.0", "5.0.0", "5.1.0"],
+            "allowedValues": ["4.1.0", "5.0.0"],
             "metadata": {
                  "description": "MapR Software Version"
             }
         },
         "adminUsername": {
             "defaultValue": "azadmin",
-            "type": "securestring",
+            "type": "string",
             "metadata": {
                  "description": "System Administrator for deployed nodes"
             }
@@ -97,11 +97,11 @@
     "variables": {
         "imagePublisher" : "OpenLogic",
         "imageOffer" : "CentOS",
-        "imageSKU" : "6.6",
+        "imageSKU" : "7.0",        
         "scriptsUri" : "[concat(parameters('artifactsBaseUrl'),'/')]",
         "nicBasename": "[concat(parameters('clusterName'),'-nic')]",
         "publicIPAddressBasename": "[concat(parameters('clusterName'),'-publicIP')]",
-        "storageAccountBasename": "[concat(trim(substring(concat(parameters('clusterName'),'        '),0,8)),substring(uniquestring(resourceGroup().id),0,8),'sa')]",
+        "storageAccountBasename": "[concat(uniquestring(resourceGroup().id),parameters('clusterName'),'sa')]",
         "networkSpec" : {
             "vnetCIDR":"10.0.0.0/16",
             "subnet1Name": "Privnet-1",
@@ -214,7 +214,7 @@
         "properties": {
             "mode": "Incremental",
             "templateLink": {
-                "uri": "[concat(variables('scriptsUri'), 'bootstrap.json')]",
+                "uri": "[concat(variables('scriptsUri'), 'bootstrap_scripted.json')]",
                 "contentVersion": "1.0.0.0"
             },
             "parameters": {
@@ -238,15 +238,6 @@
                 },
                 "location" : {
                     "value": "[parameters('location')]"
-                },
-                "authType" : {
-                    "value": "[parameters('authenticationType')]"
-                },
-                "adminUser" : {
-                    "value": "[parameters('adminUsername')]"
-                },
-                "adminPassword" : {
-                    "value": "[parameters('adminPassword')]"
                 }
             }
         }
