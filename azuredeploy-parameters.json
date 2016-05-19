@@ -1,6 +1,6 @@
 ﻿{
     "artifactsBaseUrl": {
-        "value": "https://raw.githubusercontent.com/mapr/mapr-azure/master"
+        "value": "https://maprui.blob.core.windows.net/deploy"
     },
     "clusterName": {
         "value": "mapr20160207"
@@ -36,4 +36,3 @@
             "value": "password"
     }
 }
-
